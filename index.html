@@ -1,0 +1,298 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101a2c">
+<title>HaloWatch</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0b1220;color:#eef4ff;font-family:system-ui,sans-serif}
+main{max-width:800px;margin:auto;padding:22px 15px}
+h1{font-size:38px;line-height:1.1}
+.gold{color:#f5c76b}
+.muted{color:#9eacc4;font-size:13px;line-height:1.5}
+button,input{padding:13px;border-radius:12px;font:inherit}
+button{background:#f5c76b;color:#182033;border:0;font-weight:bold}
+input{background:#19263b;color:white;border:1px solid #34445d;min-width:0;flex:1}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}
+.card{background:#17243a;border:1px solid #30415a;border-radius:18px;padding:18px;margin:13px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.score{font-size:45px;font-weight:bold;margin:10px 0}
+.meter{height:8px;background:#30415a;border-radius:10px;overflow:hidden}
+.fill{height:100%;background:#f5c76b;width:0}
+.metric{background:#101b2d;padding:12px;border-radius:12px;margin-top:10px}
+.metric b{display:block;font-size:20px}
+.hours{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.hour{background:#101b2d;padding:12px;border-radius:12px;text-align:center}
+#status{color:#9eacc4;font-size:13px;min-height:22px}
+@media(max-width:550px){.grid{grid-template-columns:1fr}h1{font-size:32px}}
+</style>
+</head>
+<body>
+<main>
+<div class="gold"><b>✧ HALOWATCH</b></div>
+<h1>Look up.<br><span class="gold">The sky has a forecast.</span></h1>
+<p class="muted">Your specialist solar and lunar halo forecasting station.</p>
+
+<div class="actions">
+<button onclick="getLocation()">◎ My location</button>
+<input id="city" placeholder="Enter a city">
+<button onclick="searchCity()">Search</button>
+</div>
+
+<div id="status">Set your location to begin.</div>
+
+<div class="grid">
+<section class="card">
+<div class="gold"><b>☼ SOLAR HALO</b></div>
+<div class="score" id="solar">—%</div>
+<div class="meter"><div class="fill" id="solarbar"></div></div>
+<p id="solarVerdict" class="muted">Waiting for forecast</p>
+<div class="metric">Sun elevation <b id="sunAlt">—</b></div>
+</section>
+
+<section class="card">
+<div style="color:#8bc8ff"><b>☾ LUNAR HALO</b></div>
+<div class="score" id="lunar">—%</div>
+<div class="meter"><div class="fill" id="lunarbar"></div></div>
+<p id="lunarVerdict" class="muted">Waiting for forecast</p>
+<div class="metric">Moon elevation <b id="moonAlt">—</b></div>
+<div class="metric">Moon illumination <b id="illum">—</b></div>
+</section>
+</div>
+
+<section class="card">
+<h2>Best upcoming opportunities</h2>
+<p class="muted">The four most promising forecast hours.</p>
+<div class="hours" id="forecast">Waiting for weather data...</div>
+</section>
+
+<section class="card">
+<h2>Atmospheric conditions</h2>
+<div class="grid">
+<div class="metric">High cloud <b id="high">—</b></div>
+<div class="metric">Total cloud <b id="cloud">—</b></div>
+<div class="metric">Visibility <b id="visibility">—</b></div>
+<div class="metric">Rain probability <b id="rain">—</b></div>
+</div>
+</section>
+
+<p class="muted">
+Weather data: Open-Meteo. Halo scores are experimental estimates, not calibrated probabilities. Weather forecasts cannot confirm the presence or orientation of suitable ice crystals.
+<br><br>
+Never look directly at the Sun. Use a safe projection method when observing solar halos.
+</p>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+
+function clamp(n,a=0,b=100){
+ return Math.max(a,Math.min(b,n));
+}
+
+function verdict(n){
+ if(n>=75)return "Very favourable conditions";
+ if(n>=55)return "Favourable conditions";
+ if(n>=35)return "Some potential";
+ return "Unfavourable conditions";
+}
+
+// Approximate solar elevation.
+function sunPosition(date,lat,lon){
+ const rad=Math.PI/180;
+ const day=Math.floor((Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate())-Date.UTC(date.getUTCFullYear(),0,0))/86400000);
+ const hour=date.getUTCHours()+date.getUTCMinutes()/60;
+ const g=2*Math.PI/365*(day-1+(hour-12)/24);
+ const dec=0.006918-0.399912*Math.cos(g)+0.070257*Math.sin(g)-0.006758*Math.cos(2*g)+0.000907*Math.sin(2*g)-0.002697*Math.cos(3*g)+0.00148*Math.sin(3*g);
+ const eq=229.18*(0.000075+0.001868*Math.cos(g)-0.032077*Math.sin(g)-0.014615*Math.cos(2*g)-0.040849*Math.sin(2*g));
+ const ha=((hour*60+eq+4*lon)/4-180)*rad;
+ return Math.asin(Math.sin(lat*rad)*Math.sin(dec)+Math.cos(lat*rad)*Math.cos(dec)*Math.cos(ha))/rad;
+}
+
+// Approximate lunar elevation.
+function moonPosition(date,lat,lon){
+ const rad=Math.PI/180;
+ const jd=date.getTime()/86400000+2440587.5;
+ const D=jd-2451543.5;
+ const N=(125.1228-0.0529538083*D)*rad;
+ const inc=5.1454*rad;
+ const w=(318.0634+0.1643573223*D)*rad;
+ const M=(115.3654+13.0649929509*D)*rad;
+ const e=0.0549;
+ const E=M+e*Math.sin(M)*(1+e*Math.cos(M));
+ const xv=Math.cos(E)-e;
+ const yv=Math.sqrt(1-e*e)*Math.sin(E);
+ const v=Math.atan2(yv,xv);
+ const r=Math.sqrt(xv*xv+yv*yv);
+ const x=r*(Math.cos(N)*Math.cos(v+w)-Math.sin(N)*Math.sin(v+w)*Math.cos(inc));
+ const y=r*(Math.sin(N)*Math.cos(v+w)+Math.cos(N)*Math.sin(v+w)*Math.cos(inc));
+ const z=r*Math.sin(v+w)*Math.sin(inc);
+ const le=Math.atan2(y,x);
+ const be=Math.atan2(z,Math.sqrt(x*x+y*y));
+ const eps=23.4393*rad;
+ const xe=Math.cos(le)*Math.cos(be);
+ const ye=Math.sin(le)*Math.cos(be)*Math.cos(eps)-Math.sin(be)*Math.sin(eps);
+ const ze=Math.sin(le)*Math.cos(be)*Math.sin(eps)+Math.cos(be)*Math.sin(eps);
+ const ra=Math.atan2(ye,xe);
+ const dec=Math.asin(ze);
+ const gmst=(280.46061837+360.98564736629*(jd-2451545))%360;
+ const H=((gmst+lon-ra/rad+540)%360-180)*rad;
+ return Math.asin(Math.sin(lat*rad)*Math.sin(dec)+Math.cos(lat*rad)*Math.cos(dec)*Math.cos(H))/rad;
+}
+
+function moonIllumination(date){
+ const syn=29.530588853;
+ const age=((date.getTime()/86400000+2440587.5-2451550.1)%syn+syn)%syn;
+ return (1-Math.cos(2*Math.PI*age/syn))/2*100;
+}
+
+function calculate(hour,lat,lon){
+ // Open-Meteo timeformat=unixtime returns seconds.
+ const date=new Date(hour.time*1000);
+ const high=hour.cloud_cover_high??0;
+ const total=hour.cloud_cover??0;
+ const vis=hour.visibility??10000;
+ const rain=hour.precipitation_probability??0;
+
+ const sun=sunPosition(date,lat,lon);
+ const moon=moonPosition(date,lat,lon);
+ const illum=moonIllumination(date);
+
+ // Experimental atmospheric suitability estimate.
+ const highFactor=clamp(100-Math.abs(high-55)*1.8);
+ const cloudPenalty=clamp((total-35)*1.4,0,75);
+ const visibilityFactor=clamp((vis-1000)/70);
+ const base=clamp(12+highFactor*.58+clamp(high/1.4)*.22-cloudPenalty*.35+visibilityFactor*.18-rain*.65);
+
+ const solar=clamp(base*(sun>8?1:sun>-3?.35:.04));
+ const lunar=clamp((base*.78+illum*.22)*(moon>8?1:moon>-3?.38:.04));
+
+ return {solar,lunar,sun,moon,illum,high,total,vis,rain,date};
+}
+
+function showScore(id,bar,verdictId,value){
+ $(id).textContent=Math.round(value)+"%";
+ $(bar).style.width=value+"%";
+ $(verdictId).textContent=verdict(value);
+}
+
+function formatTime(timestamp,timezone,options){
+ return new Intl.DateTimeFormat("en-ZA",{
+  timeZone:timezone,
+  ...options
+ }).format(new Date(timestamp*1000));
+}
+
+function render(data,lat,lon){
+ const h=data.hourly;
+ const now=Date.now()/1000;
+
+ // Find the next forecast hour using Unix seconds.
+ let i=h.time.findIndex(t=>t>=now);
+ if(i<0)i=0;
+
+ function getHour(j){
+  return {
+   time:h.time[j],
+   cloud_cover_high:h.cloud_cover_high?.[j],
+   cloud_cover:h.cloud_cover?.[j],
+   visibility:h.visibility?.[j],
+   precipitation_probability:h.precipitation_probability?.[j]
+  };
+ }
+
+ const current=calculate(getHour(i),lat,lon);
+
+ showScore("solar","solarbar","solarVerdict",current.solar);
+ showScore("lunar","lunarbar","lunarVerdict",current.lunar);
+
+ $("sunAlt").textContent=current.sun.toFixed(1)+"°";
+ $("moonAlt").textContent=current.moon.toFixed(1)+"°";
+ $("illum").textContent=Math.round(current.illum)+"%";
+ $("high").textContent=Math.round(current.high)+"%";
+ $("cloud").textContent=Math.round(current.total)+"%";
+ $("visibility").textContent=(current.vis/1000).toFixed(1)+" km";
+ $("rain").textContent=Math.round(current.rain)+"%";
+
+ // Find the strongest opportunities over the next 48 hours.
+ const candidates=[];
+ for(let j=i;j<Math.min(i+48,h.time.length);j++){
+  const c=calculate(getHour(j),lat,lon);
+  candidates.push(c);
+ }
+
+ candidates.sort((a,b)=>Math.max(b.solar,b.lunar)-Math.max(a.solar,a.lunar));
+
+ $("forecast").innerHTML=candidates.slice(0,4).map(c=>{
+  const score=Math.round(Math.max(c.solar,c.lunar));
+  const day=formatTime(c.date.getTime()/1000,data.timezone,{weekday:"short"});
+  const time=formatTime(c.date.getTime()/1000,data.timezone,{hour:"2-digit",minute:"2-digit"});
+  return `<div class="hour">
+   <b>${day}</b>
+   <h3>${time}</h3>
+   <span class="gold">${score}% potential</span>
+  </div>`;
+ }).join("");
+}
+
+async function loadWeather(lat,lon,name){
+ $("status").textContent="Loading atmospheric forecast...";
+ try{
+  const url=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=cloud_cover,cloud_cover_high,visibility,precipitation_probability&forecast_days=3&timezone=auto&timeformat=unixtime`;
+  const response=await fetch(url);
+  if(!response.ok)throw Error("Weather request failed");
+  const data=await response.json();
+  if(!data.hourly)throw Error("No forecast available");
+
+  $("status").textContent="Forecast loaded · "+name+" · "+data.timezone;
+  render(data,lat,lon);
+ }catch(error){
+  $("status").textContent="Could not load weather. Check your internet connection.";
+ }
+}
+
+function getLocation(){
+ if(!navigator.geolocation){
+  $("status").textContent="Location is not supported by this browser.";
+  return;
+ }
+
+ $("status").textContent="Requesting location permission...";
+
+ navigator.geolocation.getCurrentPosition(
+  p=>{
+   loadWeather(p.coords.latitude,p.coords.longitude,"Your location");
+  },
+  e=>{
+   $("status").textContent="Location unavailable. Please allow GPS access or search for a city.";
+  },
+  {enableHighAccuracy:false,timeout:15000,maximumAge:300000}
+ );
+}
+
+async function searchCity(){
+ const q=$("city").value.trim();
+ if(!q)return;
+
+ $("status").textContent="Finding city...";
+ try{
+  const url="https://geocoding-api.open-meteo.com/v1/search?name="+encodeURIComponent(q)+"&count=1&language=en&format=json";
+  const response=await fetch(url);
+  const data=await response.json();
+
+  if(!data.results?.length)throw Error("City not found");
+
+  const p=data.results[0];
+  const name=[p.name,p.admin1,p.country].filter(Boolean).join(", ");
+  loadWeather(p.latitude,p.longitude,name);
+ }catch(error){
+  $("status").textContent="City not found. Try another name.";
+ }
+}
+</script>
+</body>
+</html>
